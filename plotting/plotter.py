@@ -1,54 +1,65 @@
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import socket
-from capacity_pb2 import Capacity
+import matplotlib.pyplot as plt
+import threading
+import time
 
-# plotter.py sunucu ayarları
-HOST = 'localhost'
-PORT = 6000
+capacity_data = {"Server1": [], "Server2": [], "Server3": []}
+timestamps = []
 
-# Grafik oluşturma
-fig, ax = plt.subplots()
-x_data, y_data_1, y_data_2, y_data_3 = [], [], [], []
+def start_server():
+    host = "localhost"
+    port = 6000
 
-def update_graph(frame):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((HOST, PORT))
-            s.listen(1)
-            print("Plotter server is listening on port", PORT)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((host, port))
+        server_socket.listen(5)
+        print(f"Plotter server running on {host}:{port}...")
 
-            conn, addr = s.accept()
-            with conn:
-                print("Connected by", addr)
-                
-                # Kapasite verisini al ve protobuf nesnesine dönüştür
-                data = conn.recv(1024)
-                capacity = Capacity()
-                capacity.ParseFromString(data)
+        while True:
+            client_socket, addr = server_socket.accept()
+            with client_socket:
+                print(f"Connection from {addr}")
+                data = client_socket.recv(1024).decode()
+                if data:
+                    process_data(data)
 
-                # Sunucuya göre kapasite verilerini ayır
-                timestamp = capacity.timestamp
-                if addr[1] == 5001:
-                    y_data_1.append(capacity.server_status)
-                elif addr[1] == 5002:
-                    y_data_2.append(capacity.server_status)
-                elif addr[1] == 5003:
-                    y_data_3.append(capacity.server_status)
+def process_data(data):
+    global timestamps
+    server_name, capacity, timestamp = data.split(",")
+    capacity = int(capacity)
+    timestamp = int(timestamp)
 
-                x_data.append(timestamp)
+    capacity_data[server_name].append(capacity)
+    if len(timestamps) == 0 or timestamp != timestamps[-1]:
+        timestamps.append(timestamp)
 
-                # Grafik güncelleme
-                ax.clear()
-                ax.plot(x_data, y_data_1, label="Server 1 Capacity")
-                ax.plot(x_data, y_data_2, label="Server 2 Capacity")
-                ax.plot(x_data, y_data_3, label="Server 3 Capacity")
-                ax.set_title("Server Capacity Over Time")
-                ax.set_xlabel("Timestamp")
-                ax.set_ylabel("Capacity")
-                ax.legend()
-    except Exception as e:
-        print(f"Failed to receive data: {e}")
+    update_graph()
 
-ani = animation.FuncAnimation(fig, update_graph, interval=5000)
-plt.show()
+def update_graph():
+    plt.clf()
+    for server, capacities in capacity_data.items():
+        if len(capacities) > 0:
+            plt.plot(
+                timestamps[:len(capacities)],
+                capacities,
+                marker="o",
+                label=server
+            )
+    
+    plt.xlabel("Timestamp")
+    plt.ylabel("Capacity")
+    plt.title("Server Capacities Over Time")
+    plt.legend()
+    plt.pause(0.1)
+
+def start_plot():
+    plt.ion()
+    plt.show()
+
+def main():
+    plot_thread = threading.Thread(target=start_plot, daemon=True)
+    plot_thread.start()
+    start_server()
+
+if __name__ == "__main__":
+    main()
